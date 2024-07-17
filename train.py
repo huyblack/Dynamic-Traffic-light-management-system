@@ -14,6 +14,8 @@ import torch.nn.functional as F
 import torch.nn as nn
 import matplotlib.pyplot as plt
 
+np.bool = np.bool_
+
 # we need to import python modules from the $SUMO_HOME/tools directory
 if "SUMO_HOME" in os.environ:
     tools = os.path.join(os.environ["SUMO_HOME"], "tools")
@@ -218,7 +220,7 @@ def run(train=True,model_name="model",epochs=50,steps=500,ard=False):
     if not train:
         brain.Q_eval.load_state_dict(torch.load(f'models/{model_name}.bin',map_location=brain.Q_eval.device))
 
-    print(brain.Q_eval.device)
+    print("brains",brain.Q_eval.device)
     traci.close()
     for e in range(epochs):
         if train:
@@ -256,45 +258,54 @@ def run(train=True,model_name="model",epochs=50,steps=500,ard=False):
         all_lanes = list()
         
         for junction_number, junction in enumerate(all_junctions):
-            prev_wait_time[junction] = 0
-            prev_action[junction_number] = 0
-            traffic_lights_time[junction] = 0
-            prev_vehicles_per_lane[junction_number] = [0] * 4
-            # prev_vehicles_per_lane[junction_number] = [0] * (len(all_junctions) * 4) 
-            all_lanes.extend(list(traci.trafficlight.getControlledLanes(junction)))
+            if junction_number == 0:
+                print("Junction_number: ", junction_number)
+                print("Junction: ", junction)
+                prev_action[junction_number] = 0
+                traffic_lights_time[junction] = 0
+                prev_vehicles_per_lane[junction_number] = [0] * 4
+                # prev_vehicles_per_lane[junction_number] = [0] * (len(all_junctions) * 4)
+                all_lanes.extend(list(traci.trafficlight.getControlledLanes(junction)))
 
         while step <= steps:
             traci.simulationStep()
             for junction_number, junction in enumerate(all_junctions):
-                controled_lanes = traci.trafficlight.getControlledLanes(junction)
-                waiting_time = get_waiting_time(controled_lanes)
-                total_time += waiting_time
-                if traffic_lights_time[junction] == 0:
-                    vehicles_per_lane = get_vehicle_numbers(controled_lanes)
-                    # vehicles_per_lane = get_vehicle_numbers(all_lanes)
 
-                    #storing previous state and current state
-                    reward = -1 *  waiting_time
-                    state_ = list(vehicles_per_lane.values()) 
-                    state = prev_vehicles_per_lane[junction_number]
-                    prev_vehicles_per_lane[junction_number] = state_
-                    brain.store_transition(state, state_, prev_action[junction_number],reward,(step==steps),junction_number)
+                if junction_number == 0:
 
-                    #selecting new action based on current state
-                    lane = brain.choose_action(state_)
-                    prev_action[junction_number] = lane
-                    phaseDuration(junction, 6, select_lane[lane][0])
-                    phaseDuration(junction, min_duration + 10, select_lane[lane][1])
+                    controled_lanes = traci.trafficlight.getControlledLanes(junction)
+                    waiting_time = get_waiting_time(controled_lanes)
+                    print("step : ", step)
+                    print(f"juction_number = {junction_number}, waiting_time = {waiting_time}")
+                    total_time += waiting_time
 
-                    if ard:
-                        ph = str(traci.trafficlight.getPhase("0"))
-                        value = write_read(ph)
+                    if traffic_lights_time[junction] == 0:
+                        vehicles_per_lane = get_vehicle_numbers(controled_lanes)
 
-                    traffic_lights_time[junction] = min_duration + 10
-                    if train:
-                        brain.learn(junction_number)
+
+                        #storing previous state and current state
+                        reward = -1 *  waiting_time
+                        state_ = list(vehicles_per_lane.values())
+                        state = prev_vehicles_per_lane[junction_number]
+                        prev_vehicles_per_lane[junction_number] = state_
+                        brain.store_transition(state, state_, prev_action[junction_number],reward,(step==steps),junction_number)
+
+                        #selecting new action based on current state
+                        lane = brain.choose_action(state_)
+                        prev_action[junction_number] = lane
+                        phaseDuration(junction, 6, select_lane[lane][0])
+                        phaseDuration(junction, min_duration + 10, select_lane[lane][1])
+
+                        if ard:
+                            ph = str(traci.trafficlight.getPhase("0"))
+                            value = write_read(ph)
+
+                        traffic_lights_time[junction] = min_duration + 10
+                        if train:
+                            brain.learn(junction_number)
                 else:
-                    traffic_lights_time[junction] -= 1
+                    if junction_number == 0:
+                        traffic_lights_time[junction] -= 1
             step += 1
         print("total_time",total_time)
         total_time_list.append(total_time)
